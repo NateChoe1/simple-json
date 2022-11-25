@@ -214,12 +214,3 @@ int json_read(FILE *file, union json_value *ret) {
 
 	return JSON_SUCCESS;
 }
-
-char *json_strerror(int code) {
-	switch (code) {
-	case JSON_SUCCESS:	return "Success";
-	case JSON_ALLOC_FAIL:	return "Failed to allocate memory";
-	case JSON_SYNTAX_ERROR:	return "Syntax error";
-	default:		return "Unknown error code";
-	}
-}

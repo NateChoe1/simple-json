@@ -61,4 +61,7 @@ extern char *json_strerror(int code);
 #define JSON_ALLOC_FAIL 1
 #define JSON_SYNTAX_ERROR 2
 
+extern void json_free(union json_value *value);
+/* NOTE: free(value) is NEVER RUN when json_free is called. */
+
 #endif
