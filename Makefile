@@ -14,7 +14,6 @@
 #   You should have received a copy of the GNU General Public License
 #   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-SRC = $(wildcard src/*.c)
 AUTOSRC = work/json.tab.c work/json.yy.c
 OBJ = $(subst .c,.o,$(subst src,work,$(SRC))) $(subst .c,.o,$(AUTOSRC))
 LDFLAGS = -shared
@@ -26,9 +25,6 @@ OUT = simple-json.so
 
 build/$(OUT): $(OBJ)
 	$(CC) $(OBJ) -o build/$(OUT) $(LDFLAGS)
-
-work/%.o: src/%.c $(wildcard src/include/*.h)
-	$(CC) -ansi $(_CFLAGS) $(CFLAGS) $< -c -o $@
 
 work/%.o: work/%.c
 	$(CC) $(_CFLAGS) $(CFLAGS) $< -c -o $@
