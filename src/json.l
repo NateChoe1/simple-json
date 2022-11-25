@@ -50,7 +50,7 @@ static int json_strdecode(union json_value *ret, char *string, int len) {
 	readind = 1;
 	while (readind < len - 1) {
 		char c;
-		if (ret->string.len >= ret->string.alloc) {
+		if (ret->string.len + 1 >= ret->string.alloc) {
 			char *newdata;
 			ret->string.alloc *= 2;
 			newdata = realloc(ret->string.data, ret->string.alloc);
@@ -89,6 +89,7 @@ static int json_strdecode(union json_value *ret, char *string, int len) {
 	if (readind > len - 1) {
 		goto error;
 	}
+	ret->string.data[ret->string.len] = '\0';
 	return 0;
 error:
 	free(ret->string.data);

@@ -1,7 +1,7 @@
 #ifndef JSON_HAVE_JSON
 #define JSON_HAVE_JSON
 
-#include <stddef.h>
+#include <stdio.h>
 
 enum json_type {
 	JSON_OBJECT,
@@ -52,5 +52,13 @@ union json_value {
 	struct json_number number;
 	struct json_bool bool;
 };
+
+extern int json_read(FILE *file, union json_value *ret);
+/* Returns error code on error */
+extern char *json_strerror(int code);
+
+#define JSON_SUCCESS 0
+#define JSON_ALLOC_FAIL 1
+#define JSON_SYNTAX_ERROR 2
 
 #endif

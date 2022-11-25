@@ -1,9 +1,9 @@
 SRC = $(wildcard src/*.c)
 AUTOSRC = work/json.tab.c work/json.yy.c
 OBJ = $(subst .c,.o,$(subst src,work,$(SRC))) $(subst .c,.o,$(AUTOSRC))
-LDFLAGS = -lm
+LDFLAGS = -shared
 CFLAGS := -O2 -pipe -Wall -Wpedantic -Wshadow
-_CFLAGS = -fpie -Isrc/
+_CFLAGS = -fPIC -Isrc/
 INSTALLDIR := /usr/sbin
 HEADERDIR := /usr/include/
 OUT = simple-json.so

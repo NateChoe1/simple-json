@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <setjmp.h>
 
 #include <simple-json/json.h>
 #include <simple-json/consts.h>
@@ -19,12 +20,17 @@ static int json_add_object(union json_value *object,
 static int json_init_array(union json_value *array);
 static int json_add_array(union json_value *array, union json_value *value);
 
-static void json_print(union json_value *value);
+static union json_value *read_value; /* Calling yyparse stores values here */
 
-int yydebug = 1;
+static jmp_buf error_buf;
+static int json_errno;
+/* On error, yyparse stores an error number into json_error and jumps to
+   error_buf */
+
+extern FILE *yyin;
 %}
 
-%start input
+%start file
 
 %token TOK_STRING
 %token TOK_NUMBER
@@ -39,9 +45,8 @@ int yydebug = 1;
 
 %%
 
-input:
-	value		{ json_print(&$<v>1); }
-|	input value	{ json_print(&$<v>2); }
+file:
+	value		{ memcpy(read_value, &$<v>1, sizeof *read_value); }
 
 value:
 	object
@@ -53,24 +58,51 @@ value:
 
 object:
 	'{' object_items '}'	{ memcpy(&$<v>$, &$<v>2, sizeof($<v>$)); }
-|	'{' '}'		{ json_init_object(&$<v>$); }
+|	'{' '}' {
+		if ((json_errno = json_init_object(&$<v>$)) != JSON_SUCCESS) {
+			longjmp(error_buf, 0);
+		}
+	}
 object_items:
-	string ':' value	{
-		json_init_object(&$<v>$);
-		json_add_object(&$<v>$, &$<v>1, &$<v>3);
+	string ':' value {
+		if ((json_errno = json_init_object(&$<v>$)) != JSON_SUCCESS) {
+			longjmp(error_buf, 0);
+		}
+		if ((json_errno = json_add_object(&$<v>$, &$<v>1, &$<v>3))
+				!= JSON_SUCCESS) {
+			longjmp(error_buf, 0);
+		}
 	}
 |	object_items ',' string ':' value {
-		if (json_add_object(&$<v>$, &$<v>3, &$<v>5)) {
-			yyerror("Couldn't add to object");
+		if ((json_errno = json_add_object(&$<v>$, &$<v>3, &$<v>5))
+				!= JSON_SUCCESS) {
+			longjmp(error_buf, 0);
 		}
 	}
 
 array:
 	'[' array_items ']'	{ memcpy(&$<v>$, &$<v>2, sizeof($<v>$)); }
-|	'[' ']'		{ json_init_array(&$<v>$); }
+|	'[' ']' {
+		if ((json_errno = json_init_array(&$<v>$)) != JSON_SUCCESS) {
+			longjmp(error_buf, 0);
+		}
+	}
 array_items:
-	value		{ json_init_array(&$<v>$); json_add_array(&$<v>$, &$<v>1); }
-|	array_items ',' value	{ json_add_array(&$<v>$, &$<v>3); }
+	value {
+		if ((json_errno = json_init_array(&$<v>$)) != JSON_SUCCESS) {
+			longjmp(error_buf, 0);
+		}
+		if ((json_errno = json_add_array(&$<v>$, &$<v>1))
+				!= JSON_SUCCESS) {
+			longjmp(error_buf, 0);
+		}
+	}
+|	array_items ',' value {
+		if ((json_errno = json_add_array(&$<v>$, &$<v>3))
+				!= JSON_SUCCESS) {
+			longjmp(error_buf, 0);
+		}
+	}
 
 string:
 	TOK_STRING	{ memcpy(&$<v>$, &$<v>1, sizeof($<v>$)); }
@@ -88,9 +120,9 @@ null:
 %%
 
 void yyerror(char *str) {
-	fprintf(stderr, "%s\n", str);
-	return;
+	json_errno = JSON_SYNTAX_ERROR;
 }
+/* TODO: Implement this function properly */
 
 static int json_init_object(union json_value *value) {
 	value->type = JSON_OBJECT;
@@ -106,11 +138,11 @@ static int json_init_object(union json_value *value) {
 	if (value->object.values == NULL) {
 		goto error2;
 	}
-	return 0;
+	return JSON_SUCCESS;
 error2:
 	free(value->object.keys);
 error1:
-	return 1;
+	return JSON_ALLOC_FAIL;
 }
 
 static int json_add_object(union json_value *object,
@@ -122,13 +154,13 @@ static int json_add_object(union json_value *object,
 		newkeys = realloc(object->object.keys,
 				newalloc * sizeof *newkeys);
 		if (newkeys == NULL) {
-			return 1;
+			return JSON_ALLOC_FAIL;
 		}
 		object->object.keys = newkeys;
 		newvalues = realloc(object->object.values,
 				newalloc * sizeof *newvalues);
 		if (newvalues == NULL) {
-			return 1;
+			return JSON_ALLOC_FAIL;
 		}
 		object->object.values = newvalues;
 		object->object.alloc = newalloc;
@@ -137,7 +169,7 @@ static int json_add_object(union json_value *object,
 	memcpy(object->object.values + object->object.size, value,
 			sizeof *value);
 	++object->object.size;
-	return 0;
+	return JSON_SUCCESS;
 }
 
 static int json_init_array(union json_value *array) {
@@ -146,7 +178,11 @@ static int json_init_array(union json_value *array) {
 	array->array.alloc = INITIAL_ALLOC;
 	array->array.data = malloc(array->array.alloc *
 			sizeof *array->array.data);
-	return array->array.data == NULL;
+	if (array->array.data == NULL) {
+		return JSON_ALLOC_FAIL;
+	}
+	return JSON_SUCCESS;
+	/* I hate the ternary operator with a flaming passion */
 }
 
 static int json_add_array(union json_value *array, union json_value *value) {
@@ -157,58 +193,33 @@ static int json_add_array(union json_value *array, union json_value *value) {
 		newdata = realloc(array->array.data, newalloc *
 				sizeof *array->array.data);
 		if (newdata == NULL)
-			return 1;
+			return JSON_ALLOC_FAIL;
 
 		array->array.data = newdata;
 		array->array.alloc = newalloc;
 	}
 	memcpy(array->array.data + (array->array.size++), value, sizeof *value);
-	return 0;
+	return JSON_SUCCESS;
 }
 
-static void json_print(union json_value *value) {
-	int i;
-	switch (value->type) {
-	case JSON_OBJECT:
-		printf("{\n");
-		for (i = 0; i < value->object.size; ++i) {
-			if (i != 0)
-				printf(",\n");
-			json_print(value->object.keys + i);
-			printf(":\n");
-			json_print(value->object.values + i);
-		}
-		printf("}\n");
-		break;
-	case JSON_ARRAY:
-		printf("[\n");
-		for (i = 0; i < value->array.size; ++i) {
-			if (i != 0)
-				printf(",\n");
-			json_print(value->array.data + i);
-		}
-		printf("]\n");
-		break;
-	case JSON_STRING:
-		printf("\"%s\"\n", value->string.data);
-		break;
-	case JSON_NUMBER:
-		printf("%f\n", value->number.value);
-		break;
-	case JSON_BOOL:
-		if (value->bool.truth) {
-			printf("true\n");
-		}
-		else {
-			printf("false\n");
-		}
-		break;
-	case JSON_NULL:
-		printf("null\n");
-		break;
+int json_read(FILE *file, union json_value *ret) {
+	yyin = file;
+	read_value = ret;
+
+	if (setjmp(error_buf)) {
+		return json_errno;
 	}
+
+	yyparse();
+
+	return JSON_SUCCESS;
 }
 
-int main() {
-	yyparse();
+char *json_strerror(int code) {
+	switch (code) {
+	case JSON_SUCCESS:	return "Success";
+	case JSON_ALLOC_FAIL:	return "Failed to allocate memory";
+	case JSON_SYNTAX_ERROR:	return "Syntax error";
+	default:		return "Unknown error code";
+	}
 }
